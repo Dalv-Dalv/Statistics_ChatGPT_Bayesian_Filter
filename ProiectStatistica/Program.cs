@@ -1,14 +1,12 @@
 ﻿using System.Text.RegularExpressions;
 
-
-
-
-
 Console.WriteLine("Reading and processing data...");
+Console.ForegroundColor = ConsoleColor.DarkGray;
+
 var data = ReadCSV(@"C:\Dalv\School\University\Classes\Semestrul3\PS\Proiect\toxicity.csv");
 
-int totalMessagesCount = data.Length;
-int toxicMessagesCount = 0;
+var totalMessagesCount = data.Length;
+var toxicMessagesCount = 0;
 
 Dictionary<string, int> toxicWordAppearances = new();
 Dictionary<string, int> neutralWordAppearances = new();
@@ -16,47 +14,73 @@ Dictionary<string, int> wordAppearances = new();
 
 HashSet<string> ignoredWords = ["you", "u", "the", "are", "i", "to", "in", "for", "an", "so"];
 
+
+// Populate dictionaries
 foreach (var (msg, isToxic) in data) {
 	if (isToxic) toxicMessagesCount++;
 
 	var words = msg.Split(" ");
 
-	for (int i = 0; i < words.Length - 1; i++) {
-		string word = words[i], compoundWord = words[i] + " " + words[i + 1];
-		
-		AddToken(compoundWord, isToxic);
-		if(ignoredWords.Contains(word)) continue;
-		AddToken(word, isToxic);
+	for (var i = 0; i < words.Length; i++) {
+		var word = words[i];
+		if (!ignoredWords.Contains(word)) AddToken(word, isToxic);
+
+		if (i >= words.Length - 1) continue;
+
+		var compoundWord = words[i] + " " + words[i + 1];
+		if (!ignoredWords.Contains(compoundWord)) AddToken(compoundWord, isToxic);
 	}
-	
-	if(!ignoredWords.Contains(words[^1])) AddToken(words[^1], isToxic);
 }
 
 var totalToxicWords = toxicWordAppearances.Values.Sum();
 var totalNeutralWords = neutralWordAppearances.Values.Sum();
 var vocabularySize = wordAppearances.Count;
+var pToxic = (double)toxicMessagesCount / totalMessagesCount;
+var pNeutral = 1.0d - pToxic;
 
-double pToxic = (double)toxicMessagesCount / totalMessagesCount;
-double pNeutral = 1.0d - pToxic;
 const double alpha = 1.0;
+const double uselessnessThreshold = 0.0005d / 100d;
 
+// Filter out words that have a very close probability of being toxic as they are of being neutral
+foreach (var (msg, _) in data) {
+	var words = msg.Split(" ");
+
+	for (var i = 0; i < words.Length; i++) {
+		var word = words[i];
+
+		var diff = CalculateWordProbability(word, true) - CalculateWordProbability(word, false);
+		diff = Math.Abs(diff);
+
+		if (diff <= uselessnessThreshold) {
+			Console.WriteLine($"Found \"useless\" word: {word}    (P({word}|toxic)={CalculateWordProbability(word, true) * 100:0.0000}%, P({word}|neutral)={CalculateWordProbability(word, false) * 100:0.0000}%");
+			ignoredWords.Add(word);
+		}
+
+		if (i >= words.Length - 1) continue;
+
+		var compoundWord = words[i] + " " + words[i + 1];
+		diff = CalculateWordProbability(compoundWord, true) - CalculateWordProbability(compoundWord, false);
+		diff = Math.Abs(diff);
+
+		if (diff <= uselessnessThreshold) {
+			Console.WriteLine($"Found \"useless\" word: {compoundWord}    (P({compoundWord}|toxic)={CalculateWordProbability(compoundWord, true) * 100:0.0000}%, P({compoundWord}|neutral)={CalculateWordProbability(compoundWord, false) * 100:0.0000}%");
+			ignoredWords.Add(compoundWord);
+		}
+	}
+}
+
+
+Console.ForegroundColor = ConsoleColor.Gray;
 Console.WriteLine("Finished, you can now input messages:");
 
 
 string? message;
-while (!string.IsNullOrEmpty(message = Console.ReadLine())) {
-	Console.WriteLine($"Your message is {(IsMessageToxic(message) ? "TOXIC" : "neutral")}\n");
-}
-
-
-
-
-
-
+while (!string.IsNullOrEmpty(message = Console.ReadLine())) Console.WriteLine($"Your message is {(IsMessageToxic(message) ? "TOXIC" : "neutral")}\n");
 
 
 return;
-string CleanMessage(string input)  {
+
+string CleanMessage(string input) {
 	if (string.IsNullOrWhiteSpace(input))
 		return string.Empty;
 
@@ -78,16 +102,16 @@ string CleanMessage(string input)  {
 
 
 (string, bool)[] ReadCSV(string path) {
-	string[] lines = File.ReadAllLines(path);
-	
+	var lines = File.ReadAllLines(path);
+
 	var data = new (string, bool)[lines.Length];
 
-	for (int i = 0; i < lines.Length; i++) {
+	for (var i = 0; i < lines.Length; i++) {
 		var msg = lines[i];
-		msg = msg[(msg.LastIndexOf(',',  msg.Length - 4) + 1)..^2];
+		msg = msg[(msg.LastIndexOf(',', msg.Length - 4) + 1)..^2];
 		msg = CleanMessage(msg);
-		
-		bool isToxic = lines[i][^1] != '0';
+
+		var isToxic = lines[i][^1] != '0';
 
 		data[i] = (msg, isToxic);
 	}
@@ -108,10 +132,10 @@ double CalculateWordProbability(string word, bool isToxic) { // P(word|toxic)
 
 
 bool IsMessageToxic(string message) {
-	string[] words = CleanMessage(message).Split();
+	var words = CleanMessage(message).Split();
 
-	double logScoreToxic = Math.Log(pToxic);
-	double logScoreNeutral = Math.Log(pNeutral);
+	var logScoreToxic = Math.Log(pToxic);
+	var logScoreNeutral = Math.Log(pNeutral);
 
 	Console.ForegroundColor = ConsoleColor.DarkGray;
 
@@ -119,52 +143,46 @@ bool IsMessageToxic(string message) {
 	Console.WriteLine($"P(neutral) = {pNeutral * 100:0.00}%");
 
 	Console.WriteLine($"Current scores: Toxicity {logScoreToxic:0.00}   Neutral {logScoreNeutral:0.00}");
-	
-	
-	for (var i = 0; i < words.Length - 1; i++) {
-		string word = words[i], compoundWord = words[i] + " " + words[i + 1];
-		
-		logScoreToxic += Math.Log(CalculateWordProbability(compoundWord, isToxic: true));
-		logScoreNeutral += Math.Log(CalculateWordProbability(compoundWord, isToxic: false));
-
-		Console.WriteLine($"P({compoundWord}|toxic) = {CalculateWordProbability(compoundWord, isToxic: true) * 100:0.00}%");
-		Console.WriteLine($"P({compoundWord}|neutral) = {CalculateWordProbability(compoundWord, isToxic: false) * 100:0.00}%");
-		Console.WriteLine($"Current scores: Toxicity {logScoreToxic:0.00}   Neutral {logScoreNeutral:0.00}");
-		
-		if (ignoredWords.Contains(word)) continue;
 
 
-		logScoreToxic += Math.Log(CalculateWordProbability(word, isToxic: true));
-		logScoreNeutral += Math.Log(CalculateWordProbability(word, isToxic: false));
-		
-		Console.WriteLine($"P({word}|toxic) = {CalculateWordProbability(word, isToxic: true) * 100:0.00}%");
-		Console.WriteLine($"P({word}|neutral) = {CalculateWordProbability(word, isToxic: false) * 100:0.00}%");
-		Console.WriteLine($"Current scores: Toxicity {logScoreToxic:0.00}   Neutral {logScoreNeutral:0.00}");
-	}
+	for (var i = 0; i < words.Length; i++) {
+		var word = words[i];
 
-	if (!ignoredWords.Contains(words[^1])) {
-		logScoreToxic += Math.Log(CalculateWordProbability(words[^1], isToxic: true));
-		logScoreNeutral += Math.Log(CalculateWordProbability(words[^1], isToxic: false));
-		Console.WriteLine($"P({words[^1]}|toxic) = {CalculateWordProbability(words[^1], isToxic: true) * 100:0.00}%");
-		Console.WriteLine($"P({words[^1]}|neutral) = {CalculateWordProbability(words[^1], isToxic: false) * 100:0.00}%");
+		if (!ignoredWords.Contains(word)) {
+			logScoreToxic += Math.Log(CalculateWordProbability(word, true));
+			logScoreNeutral += Math.Log(CalculateWordProbability(word, false));
+
+			Console.WriteLine($"P({word}|toxic) = {CalculateWordProbability(word, true) * 100:0.00}%");
+			Console.WriteLine($"P({word}|neutral) = {CalculateWordProbability(word, false) * 100:0.00}%");
+			Console.WriteLine($"Current scores: Toxicity {logScoreToxic:0.00}   Neutral {logScoreNeutral:0.00}");
+		}
+
+		if (i >= words.Length - 1) continue;
+
+		var compoundWord = words[i] + " " + words[i + 1];
+		logScoreToxic += Math.Log(CalculateWordProbability(compoundWord, true));
+		logScoreNeutral += Math.Log(CalculateWordProbability(compoundWord, false));
+
+		Console.WriteLine($"P({compoundWord}|toxic) = {CalculateWordProbability(compoundWord, true) * 100:0.00}%");
+		Console.WriteLine($"P({compoundWord}|neutral) = {CalculateWordProbability(compoundWord, false) * 100:0.00}%");
 		Console.WriteLine($"Current scores: Toxicity {logScoreToxic:0.00}   Neutral {logScoreNeutral:0.00}");
 	}
 
 	Console.WriteLine($"Toxic score: {logScoreToxic:0.00}  Neutral Score: {logScoreNeutral:0.00}");
-	
-	
+
+
 	Console.ForegroundColor = ConsoleColor.Gray;
 
-	
+
 	return logScoreToxic > logScoreNeutral;
 }
 
 void AddToken(string word, bool isToxic) {
-	if(!wordAppearances.TryAdd(word, 1)) wordAppearances[word]++;
-		
+	if (!wordAppearances.TryAdd(word, 1)) wordAppearances[word]++;
+
 	if (isToxic) {
-		if(!toxicWordAppearances.TryAdd(word, 1)) toxicWordAppearances[word]++;
+		if (!toxicWordAppearances.TryAdd(word, 1)) toxicWordAppearances[word]++;
 	} else {
-		if(!neutralWordAppearances.TryAdd(word, 1)) neutralWordAppearances[word]++;
+		if (!neutralWordAppearances.TryAdd(word, 1)) neutralWordAppearances[word]++;
 	}
 }

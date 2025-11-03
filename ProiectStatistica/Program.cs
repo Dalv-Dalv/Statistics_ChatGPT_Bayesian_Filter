@@ -1,62 +1,117 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using ProiectStatistica;
+﻿using System.Text.RegularExpressions;
 
 
-Console.ForegroundColor = ConsoleColor.White;
 
-Console.WriteLine("Enter path to conversations json...");
-string pathToJSON = Console.ReadLine() ?? throw new InvalidOperationException();
 
-var jsonText =  File.ReadAllText(pathToJSON);
-var options = new JsonSerializerOptions {
-	PropertyNameCaseInsensitive = true
-};
 
-var conversations = JsonSerializer.Deserialize<List<Conversation>>(jsonText, options);
 
-foreach (var conversation in conversations) {
-	if (conversation?.Mapping == null) continue;
+var data = ReadCSV(@"C:\Dalv\School\University\Classes\Semestrul3\PS\Proiect\toxicity.csv");
 
-	var currentNodeId = conversation.Mapping.FirstOrDefault(x => x.Value.Parent == null).Value.Children.FirstOrDefault();
-	while (!string.IsNullOrEmpty(currentNodeId) && conversation.Mapping.ContainsKey(currentNodeId)) {
-		var currentNode = conversation.Mapping[currentNodeId];
-		if (currentNode.Message?.Author?.Role != null && currentNode.Message.Content?.Parts != null) {
-			var role = currentNode.Message.Author.Role;
-			var content = string.Join(" ", currentNode.Message.Content.Parts);
+int totalMessagesCount = data.Length;
+int toxicMessagesCount = 0;
 
-			if (!string.IsNullOrWhiteSpace(content)) Console.WriteLine($"{role}:\n{content}\nFILTERED:\n{FilterToWords(content)}");
+Dictionary<string, int> toxicWordAppearances = new();
+Dictionary<string, int> neutralWordAppearances = new();
+Dictionary<string, int> wordAppearances = new();
+
+foreach (var (msg, isToxic) in data) {
+	if (isToxic) toxicMessagesCount++;
+
+	var words = msg.Split(" ");
+	foreach (var word in words) {
+		if(!wordAppearances.TryAdd(word, 1)) wordAppearances[word]++;
+		
+		if (isToxic) {
+			if(!toxicWordAppearances.TryAdd(word, 1)) toxicWordAppearances[word]++;
+		} else {
+			if(!neutralWordAppearances.TryAdd(word, 1)) neutralWordAppearances[word]++;
 		}
-
-		currentNodeId = currentNode.Children.FirstOrDefault();
 	}
 }
-	
-	
-	
-	
-Console.ReadLine();
-return;
+
+var totalToxicWords = toxicWordAppearances.Count;
+var totalNeutralWords = neutralWordAppearances.Count;
+var vocabularySize = wordAppearances.Count;
+
+double pToxic = (double)toxicMessagesCount / totalMessagesCount;
+double pNeutral = 1.0d - pToxic;
+double alpha = 1.0;
 
 
-
-
-string[] FilterToWords(string input) {
-	if (string.IsNullOrWhiteSpace(input)) return [];
-
-	var processedString = input.ToLower();
-	processedString = Regex.Replace(processedString, @"[^\p{L}\s]", " ");
-	processedString = Regex.Replace(processedString, @"\s+", " ");
-
-	var words = processedString.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-	
-	return words;
+string? message;
+while (!string.IsNullOrEmpty(message = Console.ReadLine())) {
+	Console.WriteLine($"\nYour message is {(IsMessageToxic(message) ? "TOXIC" : "neutral")}");
 }
 
 
-void PrintColored(string message, ConsoleColor fgColor) {
-	Console.ForegroundColor =  fgColor;
-	Console.WriteLine(message);
-	Console.ForegroundColor = ConsoleColor.White;
+
+
+
+
+
+
+return;
+string CleanMessage(string input)  {
+	if (string.IsNullOrWhiteSpace(input))
+		return string.Empty;
+
+	input = input.ToLowerInvariant();
+	input = Regex.Replace(input, @"[^a-z0-9?!\s]", "");
+	input = Regex.Replace(input, @"\s+", " ");
+	input = Regex.Replace(input, @"[!?]{2,}", match => {
+		var s = match.Value;
+		if (s.Contains('?') && s.Contains('!'))
+			return "?!";
+		if (s.Contains('?'))
+			return "?";
+		return "!";
+	});
+	input = input.Trim();
+
+	return input;
+}
+
+
+(string, bool)[] ReadCSV(string path) {
+	string[] lines = File.ReadAllLines(path);
+	
+	var data = new (string, bool)[lines.Length];
+
+	for (int i = 0; i < lines.Length; i++) {
+		var msg = lines[i];
+		msg = msg[(msg.LastIndexOf(',',  msg.Length - 4) + 1)..^2];
+		msg = CleanMessage(msg);
+		
+		bool isToxic = lines[i][^1] != '0';
+
+		data[i] = (msg, isToxic);
+	}
+
+	return data;
+}
+
+
+double CalculateWordProbability(string word, bool isToxic) { // P(word|toxic)
+	if (isToxic) {
+		toxicWordAppearances.TryGetValue(word, out var wordCount);
+		return (wordCount + alpha) / (totalToxicWords + alpha * vocabularySize);
+	} else {
+		neutralWordAppearances.TryGetValue(word, out var wordCount);
+		return (wordCount + alpha) / (totalNeutralWords + alpha * vocabularySize);
+	}
+}
+
+
+bool IsMessageToxic(string message) {
+	string[] words = message.Split().Select(CleanMessage).ToArray();
+
+	double logScoreToxic = Math.Log(pToxic);
+	double logScoreNeutral = Math.Log(pNeutral);
+
+	foreach (var word in words) {
+		logScoreToxic += Math.Log(CalculateWordProbability(word, isToxic: true));
+		logScoreNeutral += Math.Log(CalculateWordProbability(word, isToxic: false));
+	}
+
+	return logScoreToxic > logScoreNeutral;
 }

@@ -8,14 +8,11 @@ public class ToxicityBayesModel {
 	private readonly Dictionary<string, int>[] nonToxicWordAppearances;
 	private readonly int[] totalToxicWordsSum;    // Numarul total de cuvinte in mesaje toxice 
 	private readonly int[] totalNonToxicWordsSum; // Numarul total de cuvinte in mesaje care nu au un anumit tip de toxicitate
-	private int neutralWordsSum = 0;
 	
-	private readonly Dictionary<string, int> neutralWordAppearances = new();
 	private readonly Dictionary<string, int> totalWordAppearances = new(); 
 
 	// Probabilitati a priori
 	private readonly double[] toxicityProbabilities; 
-	private double neutralProbability = 0; 
 
 	private readonly HashSet<string> ignoredWords = [];
 
@@ -75,7 +72,6 @@ public class ToxicityBayesModel {
 			nonToxicWordAppearances[i] ??= new  Dictionary<string, int>(); 
 			nonToxicWordAppearances[i].Clear();
 		}
-		neutralWordAppearances.Clear();
 		totalWordAppearances.Clear();
 		
 		// Iteram prin fiecare mesaj
@@ -99,23 +95,19 @@ public class ToxicityBayesModel {
 			totalToxicWordsSum[l] = toxicWordAppearances[l].Values.Sum();
 			totalNonToxicWordsSum[l] = nonToxicWordAppearances[l].Values.Sum();
 		}
-
-		neutralWordsSum = neutralWordAppearances.Values.Sum();
 	}
 
 	// Adauga token in dictionarele corespunzatoare
 	private void AddToken(string token, int[] toxicityTypes) {
 		if (!totalWordAppearances.TryAdd(token, 1)) totalWordAppearances[token]++;
 
-		if (toxicityTypes.Length == 0) {
-			if (!neutralWordAppearances.TryAdd(token, 1)) neutralWordAppearances[token]++;
-		} else {
-			for (int i = 0; i < toxicityLabels.Length; i++) {
-				if (toxicityTypes.Contains(i)) {
-					if (!toxicWordAppearances[i].TryAdd(token, 1)) toxicWordAppearances[i][token]++;
-				} else {
-					if (!nonToxicWordAppearances[i].TryAdd(token, 1)) nonToxicWordAppearances[i][token]++;
-				}
+		if (toxicityTypes.Length == 0) return;
+
+		for (int i = 0; i < toxicityLabels.Length; i++) {
+			if (toxicityTypes.Contains(i)) {
+				if (!toxicWordAppearances[i].TryAdd(token, 1)) toxicWordAppearances[i][token]++;
+			} else {
+				if (!nonToxicWordAppearances[i].TryAdd(token, 1)) nonToxicWordAppearances[i][token]++;
 			}
 		}
 	}
@@ -145,11 +137,9 @@ public class ToxicityBayesModel {
 		foreach (var word in totalWordAppearances.Keys) {
 			if (ignoredWords.Contains(word)) continue;
 			
-			var probs = new double[toxicityLabels.Length + 1];
+			var probs = new double[toxicityLabels.Length];
 			for (var i = 0; i < toxicityLabels.Length; i++)
 				probs[i] = CalculateWordProbability(word, i, false);
-		
-			probs[^1] = (neutralWordAppearances.GetValueOrDefault(word, 0) + 1.0) / (neutralWordsSum + totalWordAppearances.Count);
 		
 			var max = probs.Max();
 			var min = probs.Min();
@@ -187,14 +177,6 @@ public class ToxicityBayesModel {
 			toxicityProbabilities[i] = (double)categorySpecific[i] / data.Length;
 			Console.WriteLine($"{toxicityLabels[i]} {toxicityProbabilities[i]*100:0.000}%");
 		}
-		
-		neutralProbability = (double)totalNeutral / data.Length;
-		Console.WriteLine($"Neutral: {neutralProbability*100:0.000}%");
-		
-		// Test to see if perfectly balanced probabilities gives better results on tests, and it marginally improves tests :/ ...
-		// for (int i = 0; i < ToxicityLabels.Length; i++)
-		// 	toxicityProbabilities[i] = 1.0 / ToxicityLabels.Length;
-		// neutralProbability = 1.0 / (ToxicityLabels.Length + 1);
 	}
 	
 	public int[] CheckMessage(string message, bool debug=false) {
@@ -268,15 +250,6 @@ public class ToxicityBayesModel {
 		return Math.Max((wordCount + 1.0) / (total + vocabSize), 1e-6);
 	}
 
-	private double CalculateNeutralWordProbability(string word) {
-		var dict = neutralWordAppearances;
-		var total = neutralWordsSum;
-		
-		int wordCount = dict.GetValueOrDefault(word, 0);
-		int vocabSize = totalWordAppearances.Count;
-
-		return Math.Max((wordCount + 1.0) / (total + vocabSize), 1e-6);
-	}
 	public void RunTestDataset(string path, bool useDebug = false, double testPercentage = 1.0) {
 	    Console.ForegroundColor = ConsoleColor.DarkGray;
 	    Console.WriteLine("Reading and parsing test data...");
